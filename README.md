@@ -1,67 +1,52 @@
 # Terraform AWS Data Infrastructure
 
-Infrastructure as Code (IaC) project for provisioning separate **staging** and **production** Amazon S3 ingestion buckets with **Terraform**, using an **Amazon S3 remote backend** for state storage and lockfile-based state locking.
+[![Terraform](https://img.shields.io/badge/Terraform-IaC-844FBA?logo=terraform&logoColor=white)](https://developer.hashicorp.com/terraform)
+[![AWS](https://img.shields.io/badge/AWS-S3-FF9900?logo=amazonaws&logoColor=white)](https://aws.amazon.com/s3/)
+[![Environment](https://img.shields.io/badge/Region-eu--west--3-blue)](https://docs.aws.amazon.com/general/latest/gr/rande.html)
 
-This implementation adapts the [Core Data Engineers (CDE) data infrastructure exercise](https://github.com/coredataengineers/cde-data-infrastructure) for **Group 21** in AWS **Europe (Paris), `eu-west-3`**.
+A hands-on **Infrastructure as Code (IaC)** project that uses **Terraform and Amazon Web Services (AWS)** to provision separate **staging** and **production** S3 ingestion buckets. Terraform state is stored remotely in Amazon S3, with encryption and S3 lockfile-based locking.
 
-## Project overview
+This implementation adapts the [Core Data Engineers (CDE) data infrastructure exercise](https://github.com/coredataengineers/cde-data-infrastructure) for **Group 21**, deployed in AWS Europe (Paris), **`eu-west-3`**.
 
-The project demonstrates how to:
-
-- Define and provision AWS resources declaratively with Terraform.
-- Isolate staging and production deployments using separate Terraform working directories and state keys.
-- Store Terraform state remotely in Amazon S3, with encryption and S3 lockfile-based locking.
-- Apply consistent group and environment naming conventions.
-- Validate, plan, apply, and verify cloud infrastructure changes.
-- Keep generated local Terraform files and potential secrets out of Git.
-
-**Scope:** The Terraform configuration in this repository creates **one S3 ingestion bucket per environment**. It does **not** provision Apache Airflow itself, a complete data lake, IAM roles, networking, or ETL pipelines. The `Service = "Airflow"` production tag is metadata only.
+> **Project scope:** This repository provisions one S3 ingestion bucket per environment. It does **not** deploy Apache Airflow, ETL pipelines, IAM roles, VPCs, or a full data lake. The production `Service = "Airflow"` tag is descriptive metadata, not an Airflow deployment.
 
 ## Architecture
 
 ```text
-                        AWS | eu-west-3 (Paris)
-                                  |
-                  S3 Terraform State Bucket
-                         (Group 21)
-                                  |
-                  +---------------+---------------+
-                  |                               |
-       staging/staging.tfstate      production/production.tfstate
-                  |                               |
-       Staging Terraform                 Production Terraform
-                  |                               |
-       S3 ingestion bucket               S3 ingestion bucket
-       group-21-staging-                 group-21-production-
-       data-ingestion                    data-ingestion
+                         AWS account | eu-west-3 (Paris)
+                                      |
+                     Pre-existing S3 Terraform state bucket
+                       (name configured locally, not in Git)
+                                      |
+                  +-------------------+-------------------+
+                  |                                       |
+        staging/staging.tfstate              production/production.tfstate
+                  |                                       |
+           Terraform staging                       Terraform production
+                  |                                       |
+       S3 staging ingestion bucket             S3 production ingestion bucket
+       group-21-staging-data-ingestion         group-21-production-data-ingestion
 ```
 
-The backend bucket stores Terraform state; the two ingestion buckets are the application resources. State is isolated by S3 object key, not by separate AWS accounts.
+The **backend bucket** stores Terraform state, while the **ingestion buckets** are managed application resources. Staging and production use separate working directories and separate state object keys within the same backend bucket. They are **not** separate AWS accounts.
 
-## Deployed configuration
+## Deployed infrastructure
 
 | Setting | Staging | Production |
 | --- | --- | --- |
 | AWS region | `eu-west-3` | `eu-west-3` |
-| Terraform resource address | `aws_s3_bucket.ingestion` | `aws_s3_bucket.example` |
+| Terraform resource | `aws_s3_bucket.ingestion` | `aws_s3_bucket.example` |
 | S3 ingestion bucket | `group-21-staging-data-ingestion` | `group-21-production-data-ingestion` |
 | Remote state key | `staging/staging.tfstate` | `production/production.tfstate` |
-| State locking | S3 lockfile | S3 lockfile |
-| AWS provider requirement | `hashicorp/aws ~> 6.0` | `hashicorp/aws ~> 6.0` |
+| Locking | S3 `.tflock` object | S3 `.tflock` object |
+| AWS provider constraint | `hashicorp/aws ~> 6.0` | `hashicorp/aws ~> 6.0` |
 
-Both configurations use the same pre-created Group 21 S3 backend bucket. The bucket's actual name is configured in each `backend.tf` file. Provider dependency lock files pin the selected provider version for reproducibility.
+Both environments use the Group 21 naming convention: S3 bucket names start with `group-21-`, and the resource `Name` tags use `group_21_` prefixes. The production bucket also includes `Team` and `Service` tags.
 
-### Resource naming
-
-- **S3 bucket names:** `group-21-...` (lowercase with hyphens).
-- **Names used in tags:** `group_21_...` (underscores).
-- The `Environment` and `Group` tags identify each deployment.
-- Production also has `Team` and `Service` tags.
-
-## Repository layout
+## Repository structure
 
 ```text
-terraform-aws-data-infrastructure/
+terraform-aws-data-infrastructure-portfolio/
 ├── .gitignore
 ├── README.md
 ├── staging/
@@ -78,21 +63,23 @@ terraform-aws-data-infrastructure/
 
 | File | Purpose |
 | --- | --- |
-| `providers.tf` | Defines the AWS provider requirement and region. |
-| `backend.tf` | Configures remote S3 state and lockfile-based locking. |
-| `data_lake.tf` | Declares the environment's S3 ingestion bucket and resource tags. |
-| `.terraform.lock.hcl` | Records provider selections and checksums; committed to Git. |
-| `.gitignore` | Excludes local provider downloads, state files, sensitive variables, and logs. |
+| `providers.tf` | Declares the AWS provider and sets its region. |
+| `backend.tf` | Defines a **partial** S3 remote backend, its environment-specific state key, encryption, and locking. |
+| `data_lake.tf` | Declares the environment's S3 ingestion bucket and tags. |
+| `.terraform.lock.hcl` | Records selected provider dependencies and checksums; tracked by Git. |
+| `.gitignore` | Excludes local provider files, Terraform state, debug logs, and private backend configuration. |
+
+Each environment also requires a **local `backend.hcl` file**. That file is deliberately **not included** in the repository and is ignored by Git.
 
 ## Prerequisites
 
-- Terraform CLI installed and on `PATH` (the project was exercised using Terraform **1.17.1**).
-- AWS CLI v2 installed.
-- An IAM identity authorized to use the required S3 resources and state backend.
-- Git and a terminal (the exercise used **PowerShell on Windows**).
-- A pre-existing S3 backend bucket in `eu-west-3`, with versioning and public access blocking enabled.
+- Terraform CLI installed and accessible in `PATH` (exercise performed using Terraform **1.17.1**).
+- AWS CLI configured for an AWS identity with sufficient permissions to access the backend bucket and manage ingestion buckets.
+- Git and a terminal. Examples use **Windows PowerShell**.
+- A **pre-existing S3 state bucket** in `eu-west-3` with appropriate access controls, versioning, and public access blocking.
+- Enough available disk space to install the AWS provider plugin.
 
-Verify your tools and AWS identity:
+Check your environment:
 
 ```powershell
 terraform version
@@ -101,35 +88,30 @@ aws sts get-caller-identity
 aws configure get region
 ```
 
-If needed, set your assigned region:
+If required, set the AWS CLI's default region:
 
 ```powershell
 aws configure set region eu-west-3
 ```
 
-**Never put AWS access keys in `.tf` files, commits, screenshots, or README examples.** Terraform's AWS provider can use credentials from your configured AWS CLI profile or another supported AWS credential source.
+Do **not** include AWS credentials in Terraform files or Git history. The AWS provider can use your configured CLI credentials, profiles, or supported role-based authentication.
 
-## Run the project
+## Getting started
 
-> **Important:** This repository contains deployment-specific S3 bucket names and backend settings. If you are replicating it in another AWS account, update both environment backends and the ingestion bucket names before running `terraform init` or `apply`. S3 bucket names are globally unique.
-
-### 1. Clone
+### 1. Clone the portfolio repository
 
 ```powershell
-git clone https://github.com/ietimfon/terraform-aws-data-infrastructure.git
-cd terraform-aws-data-infrastructure
+git clone https://github.com/ietimfon/terraform-aws-data-infrastructure-portfolio.git
+cd terraform-aws-data-infrastructure-portfolio
 ```
 
-### 2. Confirm backend setup
+### 2. Configure the private remote backend
 
-Each environment's `backend.tf` should reference a bucket that **already exists** and that you are authorized to access. The backend bucket is created outside the Terraform configurations in this repository.
-
-Example backend shape (replace the placeholder with your own existing state bucket):
+The committed `backend.tf` files intentionally **omit the S3 state bucket name**. For example, `staging/backend.tf` contains:
 
 ```hcl
 terraform {
   backend "s3" {
-    bucket       = "YOUR-EXISTING-TERRAFORM-STATE-BUCKET"
     key          = "staging/staging.tfstate"
     region       = "eu-west-3"
     encrypt      = true
@@ -138,22 +120,45 @@ terraform {
 }
 ```
 
-Production uses `production/production.tfstate` as its state key. Do not point two independent environments at the same state key.
+Production uses the same structure but sets the state key to `production/production.tfstate`.
 
-### 3. Deploy staging
+Create a `backend.hcl` file **inside each environment directory** with the name of **your own existing state bucket**:
+
+```hcl
+bucket = "YOUR-EXISTING-TERRAFORM-STATE-BUCKET"
+```
+
+The two `backend.hcl` files can refer to the same backend bucket because their `backend.tf` files use different state keys. The actual backend bucket name is **not committed to Git**. The root `.gitignore` includes:
+
+```gitignore
+**/backend.hcl
+```
+
+Before initializing, make sure the referenced state bucket already exists, you can access it, and its policies support object reads/writes and lockfile operations. **A bucket used for Terraform state is distinct from the ingestion buckets created by this project.**
+
+> **If replicating this project in another AWS account:** S3 bucket names are globally unique. Change the ingestion bucket names in both `data_lake.tf` files to names available in your account, while following your own naming conventions. Do not try to create buckets using names already owned by another account.
+
+### 3. Initialize and deploy staging
+
+From the repository root:
 
 ```powershell
-cd staging
-terraform init
+cd .\staging
+terraform init "-backend-config=.\backend.hcl"
 terraform fmt -check
 terraform validate
 terraform plan
+```
+
+Review the plan before running:
+
+```powershell
 terraform apply
 ```
 
-Review the execution plan before entering `yes` to approve the apply. For an empty state with no pre-existing ingestion bucket, the initial staging plan should show **1 to add, 0 to change, 0 to destroy**.
+Enter `yes` only when the plan matches the resources you intend to create. On a new state with no corresponding existing ingestion bucket, the intended initial plan creates **one** S3 bucket.
 
-Verify:
+Verify the deployed resource:
 
 ```powershell
 aws s3api head-bucket --bucket group-21-staging-data-ingestion --region eu-west-3
@@ -161,22 +166,27 @@ terraform state list
 terraform plan
 ```
 
-The state list should include `aws_s3_bucket.ingestion`. A subsequent plan should show no changes when the deployed infrastructure matches the configuration.
+The Terraform state should list `aws_s3_bucket.ingestion`. If AWS matches the configuration, a follow-up plan should report **no changes**.
 
-### 4. Deploy production
+### 4. Initialize and deploy production
 
-From the repository root:
+From the staging directory:
 
 ```powershell
-cd production
-terraform init
+cd ..\production
+terraform init "-backend-config=.\backend.hcl"
 terraform fmt -check
 terraform validate
 terraform plan
+```
+
+Review the plan and, only if appropriate, deploy:
+
+```powershell
 terraform apply
 ```
 
-For an empty production state, the initial plan should show **1 to add, 0 to change, 0 to destroy**. Verify:
+Verify:
 
 ```powershell
 aws s3api head-bucket --bucket group-21-production-data-ingestion --region eu-west-3
@@ -184,80 +194,100 @@ terraform state list
 terraform plan
 ```
 
-The production state list should include `aws_s3_bucket.example`.
+The Terraform state should list `aws_s3_bucket.example`. The expected post-deployment plan is **no changes**.
 
-## Validation results
+### Reconfigure an existing environment
 
-The Group 21 exercise was completed on **16 November 2026**:
+If you change the backend configuration of an already initialized working directory, reinitialize it using the **same existing state bucket and key**:
 
-| Check | Observed result |
+```powershell
+terraform init -reconfigure "-backend-config=.\backend.hcl"
+terraform validate
+terraform plan
+```
+
+Do not choose a different empty state bucket or state key unless you intend to perform a carefully planned state migration. `-reconfigure` does not automatically migrate the old state.
+
+## Deployment results
+
+The Group 21 exercise was completed on **16 November 2026**. Observed results from AWS CLI and Terraform commands:
+
+| Validation | Result |
 | --- | --- |
-| Staging ingestion bucket | Present in `eu-west-3` |
-| Production ingestion bucket | Created successfully in `eu-west-3` |
+| Staging S3 ingestion bucket | Exists in `eu-west-3` |
+| Production S3 ingestion bucket | Created in `eu-west-3` |
 | Staging Terraform state | Tracks `aws_s3_bucket.ingestion` |
 | Production Terraform state | Tracks `aws_s3_bucket.example` |
-| Terraform validation | Passed in both environments |
-| Post-deployment plans | No changes reported in both environments |
+| `terraform validate` | Passed in both environments |
+| Post-deployment `terraform plan` | No changes in both environments |
+| Production `terraform apply` | `1 added, 0 changed, 0 destroyed` |
+| Reinitialization with private `backend.hcl` | Successful in both environments |
 
-The production apply reported `1 added, 0 changed, 0 destroyed`. A later staging apply reported no changes because its bucket was already deployed.
+These are **observed results from the exercise**, not automated CI checks. Deployed infrastructure may change after the date above.
 
-## Troubleshooting notes
+## Troubleshooting
 
-### `terraform init`: not enough disk space
+### Not enough disk space during `terraform init`
 
-The AWS provider download initially failed on Windows because there wasn't enough free storage to extract the provider executable. After resolving the storage issue, initialization completed successfully. Check available space with:
+An initial AWS provider installation failed when Windows lacked sufficient space to extract the provider executable. After storage was available, initialization succeeded.
 
 ```powershell
 Get-PSDrive C
 ```
 
-Terraform stores downloaded providers in local `.terraform/` directories. These directories should not be committed to Git.
+Terraform downloads providers into local `.terraform/` directories; they should not be tracked in Git.
 
-### S3 state locking: `412 PreconditionFailed`
+### `412 PreconditionFailed` acquiring the S3 state lock
 
-A staging `terraform plan` encountered a pre-existing `staging/staging.tfstate.tflock` file. Before unlocking, confirm **no other local process, team member, or CI workflow** is using the state. For a verified stale lock, use the lock ID returned in the error:
+A staging plan encountered an existing `.tflock` object. Check whether another terminal, teammate, or CI workflow is using the same state before taking action. For a **confirmed stale lock**, use the lock ID from the Terraform error:
 
 ```powershell
 terraform force-unlock LOCK_ID_FROM_ERROR
 ```
 
-Do not routinely use `-lock=false` or manually delete lockfiles. After the stale lock was cleared, the staging plan succeeded.
+Do not routinely use `-lock=false` and do not delete lock objects without confirming they are stale.
 
-### `AccessDenied` when setting S3 public access blocks
+### IAM `AccessDenied` when setting public access blocks
 
-An IAM guardrail explicitly denied `s3:PutBucketPublicAccessBlock` for the backend bucket. However, the existing settings were verified using:
+An AWS IAM guardrail prevented modification of the backend bucket's public-access-block configuration. The settings were already enabled, as verified with:
 
 ```powershell
 aws s3api get-public-access-block --bucket YOUR-EXISTING-TERRAFORM-STATE-BUCKET
 ```
 
-All four public access block settings were enabled. A denied attempt to **change** a setting does not necessarily imply that the setting is disabled.
+A denied change request does not imply the security setting is disabled.
 
-## Security and operational considerations
+### `No positional arguments are expected` during initialization
 
-- Keep AWS credentials out of source control; use AWS CLI profiles, roles, or another approved credential source.
-- Restrict read/write access to the state bucket: Terraform state can contain sensitive values.
-- Protect the state bucket with public access blocking and versioning; the exercise's backend bucket has both.
-- `encrypt = true` enables S3 server-side encryption for Terraform backend objects. The ingestion bucket attributes observed in staging included SSE-S3 (`AES256`), but the repository does not explicitly manage bucket encryption settings as separate Terraform resources.
-- S3 lockfiles require sufficient S3 object permissions to create and delete the `.tflock` object.
-- The ingestion buckets' public access settings, versioning, lifecycle rules, and access policies are **not explicitly managed** by the current Terraform configuration. Assess those requirements before using this example for real production workloads.
-- Avoid committing `.terraform/`, `*.tfstate`, `.tfvars` containing secrets, execution plans, or debug logs.
-- Use `terraform plan` before every `terraform apply`, especially in production.
-- Do not run `terraform destroy` on infrastructure that must be retained.
+When using PowerShell, pass the backend configuration flag and path as one quoted argument:
+
+```powershell
+terraform init -reconfigure "-backend-config=.\backend.hcl"
+```
+
+## Security and operational notes
+
+- **Private backend values:** `backend.hcl` is local and excluded through `.gitignore`. Never commit it or other files that reveal account-specific deployment settings you intend to keep private.
+- **State confidentiality:** Terraform state may contain sensitive resource data. Restrict access to the backend bucket and retain versioning and public access protection.
+- **State locking:** `use_lockfile = true` uses S3 lockfiles. The IAM identity needs sufficient permissions for state objects and lock objects.
+- **State encryption:** `encrypt = true` configures encryption for S3 backend state objects. Observed staging bucket attributes included SSE-S3 (`AES256`), but the Terraform project does not declare separate ingestion-bucket encryption resources.
+- **Production readiness:** Ingestion bucket policies, versioning, lifecycle settings, and explicit public access blocking are **not** fully managed in this example. Add suitable controls before using this configuration for operational production workloads.
+- **Source control:** Do not commit `.terraform/`, `.tfstate`, credentials, sensitive `.tfvars`, execution plans, local logs, or the private backend file. Commit `.terraform.lock.hcl`.
+- **Avoid accidental destruction:** Inspect every `terraform plan` before approving an apply, especially in production. Do not destroy resources that must remain deployed.
 
 ## Future improvements
 
-Potential extensions, **not implemented in this repository**:
+These are possible extensions, **not features implemented in this repository**:
 
-1. Introduce reusable Terraform modules and input variables.
-2. Add explicit S3 security controls and bucket versioning requirements for ingestion buckets.
-3. Add automated `terraform fmt -check`, `terraform validate`, and plan checks through GitHub Actions.
-4. Add IAM roles and least-privilege policies for data ingestion workloads.
-5. Expand the project into a full ingestion and processing architecture.
+1. Refactor duplicated environment settings into reusable Terraform modules and variables.
+2. Explicitly manage ingestion-bucket versioning, encryption, lifecycle, and access-control resources.
+3. Add GitHub Actions checks for formatting and validation, with a protected production deployment workflow.
+4. Introduce IAM roles and least-privilege policies for data ingestion services.
+5. Extend the infrastructure to support an end-to-end data ingestion and processing platform.
 
 ## Acknowledgment
 
-Based on the [Core Data Engineers `cde-data-infrastructure` repository](https://github.com/coredataengineers/cde-data-infrastructure), adapted and deployed for Group 21 as a hands-on Terraform and AWS infrastructure exercise.
+Adapted from the [Core Data Engineers (CDE) `cde-data-infrastructure` repository](https://github.com/coredataengineers/cde-data-infrastructure) as a hands-on Terraform and AWS infrastructure exercise. The deployment and portfolio documentation reflect the Group 21 implementation.
 
 ## Maintainer
 
